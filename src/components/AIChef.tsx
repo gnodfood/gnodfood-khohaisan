@@ -8,6 +8,7 @@ export default function AIChef() {
   const [selectedTaste, setSelectedTaste] = useState("Cay nồng phá cách");
   
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -38,6 +39,7 @@ export default function AIChef() {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setIsStreaming(true);
     setError(null);
     setResult(null);
 
@@ -45,6 +47,7 @@ export default function AIChef() {
     if (selectedProduct === "Tự nhập sản phẩm khác..." && !customProduct.trim()) {
       setError("Vui lòng điền tên loại khô hải sản bạn muốn kết hợp.");
       setIsLoading(false);
+      setIsStreaming(false);
       return;
     }
 
@@ -61,16 +64,40 @@ export default function AIChef() {
         }),
       });
 
-      const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Gặp lỗi trong lúc nhận công thức.");
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await response.json();
+          throw new Error(data.error || "Gặp lỗi trong lúc nhận công thức.");
+        } else {
+          throw new Error("Gặp lỗi " + response.status + " trong lúc kết nối với máy chủ.");
+        }
       }
-      setResult(data.recipe);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      
+      if (!reader) {
+        throw new Error("Trình duyệt không hỗ trợ tải dữ liệu thời gian thực.");
+      }
+
+      setIsLoading(false); // Switch off spinner as soon as connection is established and streaming begins
+
+      let accumulatedText = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        const chunkText = decoder.decode(value, { stream: true });
+        accumulatedText += chunkText;
+        setResult(accumulatedText);
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Không thể kết nối với Chef AI. Vui lòng kiểm tra lại kết nối.");
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -320,7 +347,7 @@ export default function AIChef() {
               </div>
             )}
 
-            {isLoading && (
+            {isLoading && !result && (
               <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
                 <div className="relative mb-6">
                   {/* Rotating Chef Hat Accent */}
@@ -336,18 +363,28 @@ export default function AIChef() {
               </div>
             )}
 
-            {result && !isLoading && (
+            {result && (
               <div className="flex-1 flex flex-col h-full justify-between">
                 
                 {/* Header Actions for Generated Card */}
                 <div className="flex justify-between items-center bg-[#f1f6fa] border border-[#e1eaef] rounded-xl px-4 py-2.5 mb-4">
                   <div className="flex items-center space-x-2 text-slate-600">
-                    <MessageSquare className="w-4 h-4 text-[#0070f3]" />
-                    <span className="text-xs font-semibold text-brand-blue-800 font-mono">Ý tưởng đã sẵn sàng</span>
+                    {isStreaming ? (
+                      <>
+                        <Sparkles className="w-4 h-4 text-[#0070f3] animate-bounce" />
+                        <span className="text-xs font-semibold text-[#0070f3] font-mono animate-pulse">Bếp Trưởng đang soạn công thức...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MessageSquare className="w-4 h-4 text-[#0070f3]" />
+                        <span className="text-xs font-semibold text-brand-blue-800 font-mono">Ý tưởng đã sẵn sàng</span>
+                      </>
+                    )}
                   </div>
                   <button
                     onClick={copyToClipboard}
-                    className="flex items-center space-x-1 py-1 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-brand-blue-900 rounded-lg text-xs font-semibold cursor-pointer transition-colors shadow-sm"
+                    disabled={isStreaming}
+                    className="flex items-center space-x-1 py-1 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-brand-blue-900 rounded-lg text-xs font-semibold cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {copied ? (
                       <>

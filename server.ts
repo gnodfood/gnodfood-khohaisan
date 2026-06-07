@@ -56,21 +56,59 @@ Vui lòng phản hồi hoàn toàn bằng Tiếng Việt thân thiện, trang tr
 
 Hãy trình bày rõ ràng, sử dụng Markdown, khoảng cách dòng thoáng và ngôn từ tinh tế quyến rũ người đọc. Hãy giữ tinh thần thương hiệu Gnod Food: Khô thượng hạng, sạch sẽ, không bột ngọt dồi dào, giữ nguyên vị ngọt tự nhiên của biển cả.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: Prompt,
-      config: {
-        temperature: 0.8,
-      },
-    });
+    // Set headers for Chunked Transfer Encoding to support real-time streaming
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-    const resultText = response.text || "Xin lỗi, không có gợi ý nào được tạo ra.";
-    res.json({ recipe: resultText });
+    let stream;
+    try {
+      stream = await ai.models.generateContentStream({
+        model: "gemini-3.5-flash",
+        contents: Prompt,
+        config: {
+          temperature: 0.82,
+        },
+      });
+    } catch (primaryErr: any) {
+      console.warn("Primary model gemini-3.5-flash failed, attempting fallback to gemini-2.5-flash streaming:", primaryErr);
+      try {
+        stream = await ai.models.generateContentStream({
+          model: "gemini-2.5-flash",
+          contents: Prompt,
+          config: {
+            temperature: 0.82,
+          },
+        });
+      } catch (fallbackErr: any) {
+        console.error("All models failed for recipe generator stream:", fallbackErr);
+        res.status(500).write(JSON.stringify({ error: "Không thể kết nối với Chef AI vào lúc này. " + (fallbackErr.message || fallbackErr) }));
+        res.end();
+        return;
+      }
+    }
+
+    try {
+      for await (const chunk of stream) {
+        if (chunk.text) {
+          res.write(chunk.text);
+        }
+      }
+    } catch (streamErr: any) {
+      console.error("Error during streaming content chunks:", streamErr);
+    } finally {
+      res.end();
+    }
   } catch (error: any) {
-    console.error("AI Recipe Error:", error);
-    res.status(500).json({
-      error: "Không thể kết nối với Chef AI vào lúc này. " + (error.message || ""),
-    });
+    console.error("AI Recipe API Init Error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Không thể kết nối với Chef AI vào lúc này. " + (error.message || ""),
+      });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -124,16 +162,35 @@ Quy tắc giao tiếp của chatbot:
 - Sử dụng tiếng Việt chuẩn. Trả lời súc tích, ngắn gọn, có cấu trúc rõ ràng với các gạch đầu dòng hoặc in đậm để dễ đọc.
 - Tuyệt đối không tự bịa ra thông tin sai lý lịch hoặc giá cả ngoài các chi tiết trên.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: contents,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.7,
-      },
-    });
+    let reply = "";
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: contents,
+        config: {
+          systemInstruction: systemInstruction,
+          temperature: 0.7,
+        },
+      });
+      reply = response.text || "Dạ, tôi chưa kịp hiểu ý bạn. Bạn có thể hỏi lại được không ạ?";
+    } catch (primaryErr: any) {
+      console.warn("Primary model gemini-3.5-flash failed for chatbot, attempting fallback to gemini-2.5-flash:", primaryErr);
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: contents,
+          config: {
+            systemInstruction: systemInstruction,
+            temperature: 0.7,
+          },
+        });
+        reply = response.text || "Dạ, tôi chưa kịp hiểu ý bạn. Bạn có thể hỏi lại được không ạ?";
+      } catch (fallbackErr: any) {
+        console.error("All models failed for chatbot:", fallbackErr);
+        throw new Error(fallbackErr.message || fallbackErr);
+      }
+    }
 
-    const reply = response.text || "Dạ, tôi chưa kịp hiểu ý bạn. Bạn có thể hỏi lại được không ạ?";
     res.json({ reply });
   } catch (error: any) {
     console.error("Chatbot API Error:", error);

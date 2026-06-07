@@ -175,7 +175,7 @@ export default function AIChatbot() {
   return (
     <>
       {/* Floating Action Buttons (FABs) */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-3">
+      <div className="fixed bottom-[85px] lg:bottom-6 right-4 sm:right-6 z-45 flex flex-col items-center gap-3">
         {/* Hotline Floating Button */}
         <a
           href="tel:0793754195"
@@ -228,7 +228,7 @@ export default function AIChatbot() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 30, scale: 0.92 }}
             transition={{ type: "spring", damping: 25, stiffness: 350 }}
-            className="fixed bottom-24 right-4 sm:right-6 z-50 w-[92vw] sm:w-[410px] h-[550px] bg-white rounded-3xl border border-brand-blue-100/60 shadow-2xl flex flex-col overflow-hidden"
+            className="fixed bottom-[85px] sm:bottom-24 right-4 sm:right-6 z-50 w-[92vw] sm:w-[410px] h-[480px] sm:h-[550px] bg-white rounded-3xl border border-brand-blue-100/60 shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Header */}
             <div className="bg-brand-blue-900 text-white p-4 flex items-center justify-between relative">

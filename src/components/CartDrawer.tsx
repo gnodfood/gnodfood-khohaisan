@@ -49,6 +49,31 @@ export default function CartDrawer({
   useEffect(() => {
     if (isOpen) {
       setStep("cart");
+      
+      // Auto-fill checkout name and phone from authenticated Firebase or local session
+      const savedLocalUser = localStorage.getItem("gnod_local_user");
+      if (auth.currentUser) {
+        setFormData(prev => ({
+          ...prev,
+          name: auth.currentUser?.displayName || prev.name,
+          phone: auth.currentUser?.email?.endsWith("@phone-gnod.com")
+            ? auth.currentUser.email.split("@")[0]
+            : prev.phone
+        }));
+      } else if (savedLocalUser) {
+        try {
+          const parsed = JSON.parse(savedLocalUser);
+          setFormData(prev => ({
+            ...prev,
+            name: parsed.displayName || prev.name,
+            phone: parsed.email?.endsWith("@phone-gnod.com")
+              ? parsed.email.split("@")[0]
+              : prev.phone
+          }));
+        } catch {
+          // Ignore parse errors
+        }
+      }
     }
   }, [isOpen]);
 
@@ -117,32 +142,79 @@ Phí vận chuyển: ${formatPrice(getShippingFee())} (${formData.deliveryMethod
 Nơi giao: ${formData.address}
 Ghi chú: ${formData.notes || "Không có"}`;
 
-    // Concurrently write to Firebase Firestore if the user is authenticated
+    // Determine active customer UID for account ownership coupling
+    let activeUid = "";
     if (auth.currentUser) {
+      activeUid = auth.currentUser.uid;
+    } else {
+      const savedLocalUser = localStorage.getItem("gnod_local_user");
+      if (savedLocalUser) {
+        try {
+          const parsed = JSON.parse(savedLocalUser);
+          activeUid = parsed.uid;
+        } catch {
+          activeUid = "";
+        }
+      }
+    }
+
+    const orderData = {
+      orderId: mockOrderId,
+      ownerId: activeUid || `guest_${Date.now()}`,
+      recipientName: formData.name,
+      recipientPhone: formData.phone,
+      shippingAddress: formData.address,
+      deliveryMethod: formData.deliveryMethod,
+      items: cartItems.map(item => ({
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        unit: item.unit
+      })),
+      totalAmount: totalBill,
+      shippingFee: getShippingFee(),
+      notes: formData.notes || "",
+      status: "pending"
+    };
+
+    // Keep checkout non-blocking by implementing local fallback sync
+    if (activeUid) {
       try {
-        const orderDocRef = doc(db, "orders", mockOrderId);
-        await setDoc(orderDocRef, {
-          orderId: mockOrderId,
-          ownerId: auth.currentUser.uid,
-          recipientName: formData.name,
-          recipientPhone: formData.phone,
-          shippingAddress: formData.address,
-          deliveryMethod: formData.deliveryMethod,
-          items: cartItems.map(item => ({
-            name: item.name,
-            price: item.price,
-            quantity: item.quantity,
-            unit: item.unit
-          })),
-          totalAmount: totalBill,
-          shippingFee: getShippingFee(),
-          notes: formData.notes || "",
-          status: "pending",
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
-        });
+        // If standard Firebase user & not offline, try writing to cloud Firestore
+        if (auth.currentUser && !activeUid.startsWith("local_")) {
+          const orderDocRef = doc(db, "orders", mockOrderId);
+          await setDoc(orderDocRef, {
+            ...orderData,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          });
+        } else {
+          // Local storage fallback for local mode user
+          const savedOrders = localStorage.getItem("gnod_local_orders");
+          const localList = savedOrders ? JSON.parse(savedOrders) : [];
+          localList.push({
+            ...orderData,
+            id: mockOrderId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          localStorage.setItem("gnod_local_orders", JSON.stringify(localList));
+        }
       } catch (err: any) {
-        handleFirestoreError(err, OperationType.CREATE, `orders/${mockOrderId}`);
+        console.warn("Direct Cloud write failed. Saving tracking to local device database replica:", err);
+        try {
+          const savedOrders = localStorage.getItem("gnod_local_orders");
+          const localList = savedOrders ? JSON.parse(savedOrders) : [];
+          localList.push({
+            ...orderData,
+            id: mockOrderId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          localStorage.setItem("gnod_local_orders", JSON.stringify(localList));
+        } catch (localErr) {
+          console.error("Local storage device write failure:", localErr);
+        }
       }
     }
 
